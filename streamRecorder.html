@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Recorder with Classification</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .video-container {
+            position: relative;
+            width: 100%;
+            height: auto;
+        }
+        video, canvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+    </style>
+    <!-- Load TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <!-- Load a pre-trained model -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier"></script>
+</head>
+<body class="flex flex-col min-h-screen bg-gradient-to-br from-purple-800 to-pink-500 justify-center items-center text-center text-white">
+    <h1 class="text-5xl font-bold mb-8">Screen Recorder with <span class="text-yellow-300">Classification</span></h1>
+
+    <div class="flex flex-col lg:flex-row w-full max-w-4xl bg-white rounded-lg shadow-lg overflow-hidden">
+        <div class="bg-gradient-to-b from-purple-600 to-blue-700 text-white flex flex-col justify-between p-8 lg:w-1/2">
+            <button id="start" class="bg-blue-500 text-white font-bold py-2 rounded-lg mb-4">Start Recording</button>
+            <button id="stop" class="bg-gray-600 text-white font-bold py-2 rounded-lg mb-4 cursor-not-allowed opacity-50" disabled>Stop Recording</button>
+            <button id="download" class="bg-green-500 text-white font-bold py-2 rounded-lg mb-4 cursor-not-allowed opacity-50" disabled>Download Video</button>
+            
+            <div class="mb-4">
+                <label for="recordType" class="block mb-2">Record Type:</label>
+                <select id="recordType" class="w-full p-2 border rounded-lg text-gray-900">
+                    <option value="both">Screen and Camera</option>
+                    <option value="screen">Screen Only</option>
+                    <option value="camera">Camera Only</option>
+                </select>
+            </div>
+            
+            <div class="mb-4">
+                <label for="quality" class="block mb-2">Quality:</label>
+                <select id="quality" class="w-full p-2 border rounded-lg text-gray-900">
+                    <option value="1920x1080">Full HD (1920 x 1080)</option>
+                    <option value="1280x720">HD (1280 x 720)</option>
+                    <option value="640x480">SD (640 x 480)</option>
+                </select>
+            </div>
+
+            <div class="mb-4">
+                <label for="fileType" class="block mb-2">File Type:</label>
+                <select id="fileType" class="w-full p-2 border rounded-lg text-gray-900">
+                    <option value="webm">WEBM</option>
+                    <option value="mp4">MP4</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="bg-gradient-to-b from-pink-500 to-red-500 text-white p-8 lg:w-1/2 video-container">
+            <p class="text-lg mb-4" id="status">Ready to record</p>
+            <video id="video" class="w-full h-auto bg-black rounded-lg" playsinline></video>
+            <canvas id="canvas" class="w-full h-auto"></canvas>
+            <div class="text-lg mt-5" id="classification-status">Loading model...</div>
+        </div>
+    </div>
+
+    <script>
+        const startButton = document.getElementById('start');
+        const stopButton = document.getElementById('stop');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const canvasCtx = canvas.getContext('2d');
+        const status = document.getElementById('status');
+        const classificationStatus = document.getElementById('classification-status');
+        const qualitySelect = document.getElementById('quality');
+        const fileTypeSelect = document.getElementById('fileType');
+        const recordTypeSelect = document.getElementById('recordType');
+        const downloadButton = document.getElementById('download');
+
+        let mediaRecorder;
+        let recordedChunks = [];
+        let videoURL;
+        let mobilenetModel;
+        let classifier;
+
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            video.srcObject = stream;
+            await new Promise(resolve => video.onloadedmetadata = resolve);
+            video.play();
+        }
+
+        async function loadModels() {
+            try {
+                mobilenetModel = await mobilenet.load();
+                classifier = knnClassifier.create();
+                classificationStatus.textContent = 'Model loaded successfully';
+            } catch (error) {
+                console.error('Error loading model:', error);
+                classificationStatus.textContent = 'Failed to load model.';
+            }
+        }
+
+        async function classifyImage() {
+            const webcam = await tf.data.webcam(video);
+            while (true) {
+                const img = await webcam.capture();
+                const logits = mobilenetModel.infer(img, 'conv_preds');
+                
+                const prediction = await classifier.predictClass(logits);
+                const className = prediction.label || 'No class';
+                
+                classificationStatus.textContent = `Prediction: ${className}`;
+                
+                img.dispose();
+                await tf.nextFrame();
+            }
+        }
+
+        async function trainClassifier(imageElement, classIndex) {
+            const img = tf.browser.fromPixels(imageElement);
+            const logits = mobilenetModel.infer(img, true);
+            classifier.addExample(logits, classIndex);
+            img.dispose();
+        }
+
+        async function startClassification() {
+            await setupCamera();
+            loadModels();
+            classifyImage();
+        }
+
+        async function getMediaDevices(recordType) {
+            try {
+                let audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                let videoStream = null, screenStream = null;
+                const [width, height] = qualitySelect.value.split('x').map(Number);
+
+                if (recordType === 'both' || recordType === 'screen') {
+                    screenStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: {
+                            width: { ideal: width },
+                            height: { ideal: height }
+                        }
+                    });
+                }
+
+                if (recordType === 'both' || recordType === 'camera') {
+                    await startClassification();
+                }
+
+                const tracks = [
+                    ...(audioStream ? audioStream.getTracks() : []),
+                    ...(screenStream ? screenStream.getTracks() : []),
+                    ...(video.srcObject ? video.srcObject.getTracks() : [])
+                ];
+
+                return new MediaStream(tracks);
+
+            } catch (error) {
+                console.error('Error accessing devices:', error);
+                status.textContent = 'Error accessing devices. Make sure permissions are granted.';
+                throw error;
+            }
+        }
+
+        startButton.addEventListener('click', async () => {
+            recordedChunks = [];
+            const recordType = recordTypeSelect.value;
+
+            try {
+                const combinedStream = await getMediaDevices(recordType);
+                mediaRecorder = new MediaRecorder(combinedStream);
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    const fileType = fileTypeSelect.value === 'mp4' ? 'video/mp4' : 'video/webm';
+                    const blob = new Blob(recordedChunks, { type: fileType });
+
+                    videoURL = URL.createObjectURL(blob);
+                    video.srcObject = null;
+                    video.src = videoURL;
+                    video.load();
+                    
+                    downloadButton.disabled = false;
+                    status.textContent = 'Recording finished. Video saved!';
+                };
+
+                mediaRecorder.start();
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                status.textContent = 'Recording in progress...';
+            } catch (error) {
+                console.error('Error starting recording:', error);
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            if (mediaRecorder) {
+                mediaRecorder.stop();
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(track => track.stop());
+                }
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                status.textContent = 'Recording stopped. Saving video...';
+            }
+        });
+
+        downloadButton.addEventListener('click', () => {
+            if (videoURL) {
+                const a = document.createElement('a');
+                a.href = videoURL;
+                a.download = `recording.${fileTypeSelect.value}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        });
+
+        video.addEventListener('play', () => {
+            const resizeCanvas = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                video.style.width = '100%';
+                video.style.height = 'auto';
+                canvas.style.width = '100%';
+                canvas.style.height = 'auto';
+            };
+
+            video.addEventListener('loadedmetadata', resizeCanvas);
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+        });
+    </script>
+</body>
+</html>
