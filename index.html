@@ -3,182 +3,354 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Screen Recorder with Classification</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <title>AI-Enhanced Screen & Camera Recorder</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
+        /* Custom styles for video feed and overlays */
         .video-container {
             position: relative;
             width: 100%;
-            height: auto;
+            padding-top: 56.25%; /* 16:9 Aspect Ratio */
+            background-color: #1f2937; /* Dark gray background */
+            border-radius: 0.5rem;
+            overflow: hidden;
         }
-        video, canvas {
-            display: block;
-            max-width: 100%;
-            height: auto;
-        }
-        canvas {
+        #liveVideo {
             position: absolute;
             top: 0;
             left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* Ensure the video fits */
+        }
+        /* Hide canvas, it's used internally by TF */
+        #tfCanvas {
+            display: none;
+        }
+        /* Custom button styling */
+        .btn-primary {
+            transition: all 0.2s ease;
+        }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
     </style>
-    <!-- Load TensorFlow.js -->
+    <!-- Load TensorFlow.js and Models -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <!-- Load a pre-trained model -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier"></script>
 </head>
-<body class="flex flex-col min-h-screen bg-gradient-to-br from-purple-800 to-pink-500 justify-center items-center text-center text-white">
-    <h1 class="text-5xl font-bold mb-8">Screen Recorder with <span class="text-yellow-300">Classification</span></h1>
+<body class="p-4 sm:p-8 bg-gray-900 min-h-screen text-white font-sans flex justify-center items-center">
 
-    <div class="flex flex-col lg:flex-row w-full max-w-4xl bg-white rounded-lg shadow-lg overflow-hidden">
-        <div class="bg-gradient-to-b from-purple-600 to-blue-700 text-white flex flex-col justify-between p-8 lg:w-1/2">
-            <button id="start" class="bg-blue-500 text-white font-bold py-2 rounded-lg mb-4">Start Recording</button>
-            <button id="stop" class="bg-gray-600 text-white font-bold py-2 rounded-lg mb-4 cursor-not-allowed opacity-50" disabled>Stop Recording</button>
-            <button id="download" class="bg-green-500 text-white font-bold py-2 rounded-lg mb-4 cursor-not-allowed opacity-50" disabled>Download Video</button>
-            
-            <div class="mb-4">
-                <label for="recordType" class="block mb-2">Record Type:</label>
-                <select id="recordType" class="w-full p-2 border rounded-lg text-gray-900">
-                    <option value="both">Screen and Camera</option>
-                    <option value="screen">Screen Only</option>
-                    <option value="camera">Camera Only</option>
-                </select>
+    <div class="w-full max-w-6xl bg-gray-800 rounded-2xl shadow-2xl overflow-hidden p-6 lg:p-10">
+
+        <header class="text-center mb-10">
+            <h1 class="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">
+                AI Recorder
+            </h1>
+            <p class="mt-2 text-gray-400 text-lg">Screen & Camera Recording with Live Classification</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Left Panel: Controls -->
+            <div class="lg:col-span-1 bg-gray-700 p-6 rounded-xl shadow-lg h-full flex flex-col justify-between">
+                <div>
+                    <h2 class="text-2xl font-semibold mb-4 text-cyan-300">Recorder Settings</h2>
+
+                    <div class="space-y-4 mb-6">
+                        <!-- Record Type -->
+                        <div>
+                            <label for="recordType" class="block text-sm font-medium text-gray-300 mb-1">Source Selection</label>
+                            <select id="recordType" class="w-full p-3 bg-gray-600 border border-gray-500 rounded-lg text-white focus:ring-purple-500 focus:border-purple-500">
+                                <option value="screen">Screen Only (Recommended)</option>
+                                <option value="camera">Camera Only (For Classification Demo)</option>
+                                <option value="both">Screen and Camera</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Quality -->
+                        <div>
+                            <label for="quality" class="block text-sm font-medium text-gray-300 mb-1">Video Quality (Screen)</label>
+                            <select id="quality" class="w-full p-3 bg-gray-600 border border-gray-500 rounded-lg text-white focus:ring-purple-500 focus:border-purple-500">
+                                <option value="1920x1080">Full HD (1080p)</option>
+                                <option value="1280x720">HD (720p)</option>
+                                <option value="640x480">SD (480p)</option>
+                            </select>
+                        </div>
+                        
+                        <!-- File Type -->
+                        <div>
+                            <label for="fileType" class="block text-sm font-medium text-gray-300 mb-1">Output Format</label>
+                            <select id="fileType" class="w-full p-3 bg-gray-600 border border-gray-500 rounded-lg text-white focus:ring-purple-500 focus:border-purple-500">
+                                <option value="webm">WEBM (High Compatibility)</option>
+                                <option value="mp4">MP4 (Note: Browser support varies)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="space-y-4 mt-6">
+                    <button id="start" class="btn-primary w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-xl shadow-md">
+                        <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18H3a2 2 0 01-2-2V8a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H5z"></path></svg>
+                        Start Recording
+                    </button>
+                    <button id="stop" disabled class="btn-primary w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-4 rounded-xl shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+                        <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"></path></svg>
+                        Stop Recording
+                    </button>
+                    <button id="download" disabled class="btn-primary w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-4 rounded-xl shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+                        <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        Download Video
+                    </button>
+                </div>
+            </div>
+
+            <!-- Middle Panel: Video Preview -->
+            <div class="lg:col-span-2 bg-gray-700 p-6 rounded-xl shadow-lg">
+                <h2 class="text-2xl font-semibold mb-4 text-purple-300">Live Preview & Status</h2>
+                
+                <!-- Status Message -->
+                <div class="mb-4 p-3 bg-gray-600 rounded-lg text-center font-mono text-sm" id="status">
+                    Ready. Select your source and start recording.
+                </div>
+
+                <!-- Video Display -->
+                <div class="video-container">
+                    <video id="liveVideo" playsinline autoplay muted></video>
+                    <!-- Canvas for TF.js operations (kept hidden) -->
+                    <canvas id="tfCanvas"></canvas>
+                </div>
+
+                <!-- Classification Status -->
+                <div class="mt-4 p-4 bg-gray-600 rounded-lg">
+                    <h3 class="text-lg font-medium text-white mb-2">Live AI Classification</h3>
+                    <div id="classification-status" class="text-yellow-300 font-bold text-xl">
+                        Loading TensorFlow models...
+                    </div>
+                </div>
             </div>
             
-            <div class="mb-4">
-                <label for="quality" class="block mb-2">Quality:</label>
-                <select id="quality" class="w-full p-2 border rounded-lg text-gray-900">
-                    <option value="1920x1080">Full HD (1920 x 1080)</option>
-                    <option value="1280x720">HD (1280 x 720)</option>
-                    <option value="640x480">SD (640 x 480)</option>
-                </select>
-            </div>
+            <!-- Right Panel: Classification Training (Moved to the bottom for mobile) -->
+            <div class="lg:col-span-3 bg-gray-700 p-6 rounded-xl shadow-lg mt-8">
+                <h2 class="text-2xl font-semibold mb-4 text-purple-300">KNN Classifier Training (Camera Required)</h2>
+                <p class="text-sm text-gray-400 mb-4">Use the camera to train two custom classes. Classification will only run when the camera is active.</p>
 
-            <div class="mb-4">
-                <label for="fileType" class="block mb-2">File Type:</label>
-                <select id="fileType" class="w-full p-2 border rounded-lg text-gray-900">
-                    <option value="webm">WEBM</option>
-                    <option value="mp4">MP4</option>
-                </select>
-            </div>
-        </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Class 1 Training -->
+                    <div class="p-4 bg-gray-800 rounded-lg border border-cyan-500">
+                        <p class="text-lg font-semibold mb-2">Class 1: <span id="count1" class="text-cyan-300">0</span> examples</p>
+                        <button id="train1" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                            Train "Positive"
+                        </button>
+                    </div>
 
-        <div class="bg-gradient-to-b from-pink-500 to-red-500 text-white p-8 lg:w-1/2 video-container">
-            <p class="text-lg mb-4" id="status">Ready to record</p>
-            <video id="video" class="w-full h-auto bg-black rounded-lg" playsinline></video>
-            <canvas id="canvas" class="w-full h-auto"></canvas>
-            <div class="text-lg mt-5" id="classification-status">Loading model...</div>
+                    <!-- Class 2 Training -->
+                    <div class="p-4 bg-gray-800 rounded-lg border border-fuchsia-500">
+                        <p class="text-lg font-semibold mb-2">Class 2: <span id="count2" class="text-fuchsia-300">0</span> examples</p>
+                        <button id="train2" class="w-full bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                            Train "Neutral"
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
+        const liveVideo = document.getElementById('liveVideo');
+        const tfCanvas = document.getElementById('tfCanvas');
+        const statusEl = document.getElementById('status');
+        const classificationStatusEl = document.getElementById('classification-status');
+        
         const startButton = document.getElementById('start');
         const stopButton = document.getElementById('stop');
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const canvasCtx = canvas.getContext('2d');
-        const status = document.getElementById('status');
-        const classificationStatus = document.getElementById('classification-status');
+        const downloadButton = document.getElementById('download');
+        const trainButton1 = document.getElementById('train1');
+        const trainButton2 = document.getElementById('train2');
+        const count1El = document.getElementById('count1');
+        const count2El = document.getElementById('count2');
+        
+        const recordTypeSelect = document.getElementById('recordType');
         const qualitySelect = document.getElementById('quality');
         const fileTypeSelect = document.getElementById('fileType');
-        const recordTypeSelect = document.getElementById('recordType');
-        const downloadButton = document.getElementById('download');
 
         let mediaRecorder;
         let recordedChunks = [];
-        let videoURL;
         let mobilenetModel;
         let classifier;
+        let rafId; // Request Animation Frame ID for classification loop
+        let isCameraActive = false;
+        let isRecording = false;
 
-        async function setupCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            video.srcObject = stream;
-            await new Promise(resolve => video.onloadedmetadata = resolve);
-            video.play();
-        }
-
+        // --- Model Initialization ---
         async function loadModels() {
+            classificationStatusEl.textContent = 'Loading MobileNet and KNN Classifier...';
             try {
-                mobilenetModel = await mobilenet.load();
+                mobilenetModel = await mobilenet.load({ version: 2, alpha: 0.5 });
                 classifier = knnClassifier.create();
-                classificationStatus.textContent = 'Model loaded successfully';
+                classificationStatusEl.textContent = 'Model Ready. Classification will start when camera is active.';
+                trainButton1.disabled = false;
+                trainButton2.disabled = false;
             } catch (error) {
-                console.error('Error loading model:', error);
-                classificationStatus.textContent = 'Failed to load model.';
+                console.error('Error loading TensorFlow models:', error);
+                classificationStatusEl.textContent = 'ERROR: Failed to load models.';
             }
         }
 
-        async function classifyImage() {
-            const webcam = await tf.data.webcam(video);
-            while (true) {
-                const img = await webcam.capture();
-                const logits = mobilenetModel.infer(img, 'conv_preds');
-                
-                const prediction = await classifier.predictClass(logits);
-                const className = prediction.label || 'No class';
-                
-                classificationStatus.textContent = `Prediction: ${className}`;
-                
-                img.dispose();
-                await tf.nextFrame();
+        // --- Classification Logic ---
+
+        // Trains the classifier with a new example from the current video frame
+        function trainClass(classIndex) {
+            if (!mobilenetModel || !isCameraActive || isRecording) {
+                statusEl.textContent = 'Error: Camera is not active or recording is in progress.';
+                return;
             }
-        }
 
-        async function trainClassifier(imageElement, classIndex) {
-            const img = tf.browser.fromPixels(imageElement);
-            const logits = mobilenetModel.infer(img, true);
-            classifier.addExample(logits, classIndex);
-            img.dispose();
-        }
-
-        async function startClassification() {
-            await setupCamera();
-            loadModels();
-            classifyImage();
-        }
-
-        async function getMediaDevices(recordType) {
             try {
-                let audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                let videoStream = null, screenStream = null;
-                const [width, height] = qualitySelect.value.split('x').map(Number);
+                // Get the intermediate activation (features) from MobileNet
+                const activation = mobilenetModel.infer(liveVideo, 'conv_preds');
+                classifier.addExample(activation, classIndex);
 
-                if (recordType === 'both' || recordType === 'screen') {
-                    screenStream = await navigator.mediaDevices.getDisplayMedia({
-                        video: {
-                            width: { ideal: width },
-                            height: { ideal: height }
-                        }
-                    });
-                }
-
-                if (recordType === 'both' || recordType === 'camera') {
-                    await startClassification();
-                }
-
-                const tracks = [
-                    ...(audioStream ? audioStream.getTracks() : []),
-                    ...(screenStream ? screenStream.getTracks() : []),
-                    ...(video.srcObject ? video.srcObject.getTracks() : [])
-                ];
-
-                return new MediaStream(tracks);
-
+                // Update UI counts
+                const totalExamples = classifier.getNumExamples();
+                count1El.textContent = totalExamples[0] || 0;
+                count2El.textContent = totalExamples[1] || 0;
+                statusEl.textContent = `Trained Class ${classIndex} with ${totalExamples[classIndex - 1] || 0} examples.`;
             } catch (error) {
-                console.error('Error accessing devices:', error);
-                status.textContent = 'Error accessing devices. Make sure permissions are granted.';
-                throw error;
+                console.error("Training error:", error);
+                statusEl.textContent = 'Training Failed: Could not capture frame.';
             }
         }
+
+        async function classificationLoop() {
+            if (!isCameraActive || !mobilenetModel || classifier.getNumClasses() === 0) {
+                // Stop the loop if the camera is off or no classes are trained
+                classificationStatusEl.textContent = 'Waiting for camera feed or classifier training...';
+                cancelAnimationFrame(rafId);
+                return;
+            }
+
+            try {
+                // Get the intermediate activation (features) from MobileNet
+                const activation = mobilenetModel.infer(liveVideo, 'conv_preds');
+                
+                const result = await classifier.predictClass(activation);
+                
+                const classNames = {
+                    0: 'POSITIVE (Class 1)',
+                    1: 'NEUTRAL (Class 2)'
+                };
+
+                const prediction = classNames[result.label] || 'Unknown';
+                const confidence = (result.confidences[result.label] * 100).toFixed(2);
+
+                classificationStatusEl.innerHTML = `
+                    Prediction: <span class="text-purple-300 font-extrabold">${prediction}</span> 
+                    (Confidence: ${confidence}%)
+                `;
+            } catch (error) {
+                // Ignore small prediction errors during rapid inference
+                // console.warn("Prediction error:", error);
+            }
+
+            rafId = requestAnimationFrame(classificationLoop);
+        }
+
+        // --- Media Stream Management ---
+
+        function stopCurrentStream(videoEl) {
+            if (videoEl.srcObject) {
+                videoEl.srcObject.getTracks().forEach(track => track.stop());
+                videoEl.srcObject = null;
+                isCameraActive = false;
+            }
+        }
+
+        async function getCombinedStream(recordType) {
+            let tracks = [];
+            let videoTracks;
+            const [width, height] = qualitySelect.value.split('x').map(Number);
+
+            // 1. Get Audio Stream (always try)
+            try {
+                const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                tracks.push(...audioStream.getAudioTracks());
+            } catch (e) {
+                console.warn('Microphone access denied or unavailable.', e);
+                statusEl.textContent = 'Warning: Microphone access denied.';
+            }
+
+            // 2. Get Video Stream (Screen or Camera)
+            if (recordType === 'screen' || recordType === 'both') {
+                statusEl.textContent = 'Requesting screen share permission...';
+                const screenStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { width: { ideal: width }, height: { ideal: height } }
+                });
+                videoTracks = screenStream.getVideoTracks();
+                
+                // Monitor for screen sharing stop event
+                screenStream.getVideoTracks()[0].onended = () => {
+                    if (isRecording) stopButton.click();
+                };
+            }
+
+            if (recordType === 'camera' || recordType === 'both') {
+                statusEl.textContent = 'Requesting camera access...';
+                const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                videoTracks = videoTracks ? videoTracks.concat(cameraStream.getVideoTracks()) : cameraStream.getVideoTracks();
+                
+                // Start classification loop if camera is involved
+                if (!rafId) {
+                    isCameraActive = true;
+                    classificationLoop();
+                }
+            }
+            
+            // Set the preview video source to the primary stream (screen if sharing, otherwise camera)
+            if (videoTracks && videoTracks.length > 0) {
+                liveVideo.srcObject = new MediaStream(videoTracks);
+                isCameraActive = (recordType === 'camera' || recordType === 'both'); // Camera is active if selected
+            } else if (!tracks.length) {
+                 throw new Error("No media tracks selected or granted.");
+            }
+
+            tracks.push(...(videoTracks || []));
+            return new MediaStream(tracks);
+        }
+
+        // --- Event Listeners ---
 
         startButton.addEventListener('click', async () => {
+            stopCurrentStream(liveVideo); // Stop any previous preview
             recordedChunks = [];
             const recordType = recordTypeSelect.value;
 
             try {
-                const combinedStream = await getMediaDevices(recordType);
-                mediaRecorder = new MediaRecorder(combinedStream);
+                // If only camera is selected, ensure camera stream is active for preview/classification
+                if (recordType === 'camera' && !liveVideo.srcObject) {
+                    const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    liveVideo.srcObject = cameraStream;
+                    isCameraActive = true;
+                    // Start classification loop
+                    if (!rafId) classificationLoop();
+                }
+
+                // Get the combined stream for recording
+                const combinedStream = await getCombinedStream(recordType);
+
+                // Ensure the mime type is supported
+                let mimeType = `video/${fileTypeSelect.value}`;
+                if (fileTypeSelect.value === 'mp4' && !MediaRecorder.isTypeSupported('video/mp4')) {
+                    mimeType = 'video/webm';
+                    statusEl.textContent = 'Warning: MP4 not supported. Recording as WEBM.';
+                    fileTypeSelect.value = 'webm';
+                }
+
+                mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
+
                 mediaRecorder.ondataavailable = (event) => {
                     if (event.data.size > 0) {
                         recordedChunks.push(event.data);
@@ -186,64 +358,112 @@
                 };
 
                 mediaRecorder.onstop = () => {
-                    const fileType = fileTypeSelect.value === 'mp4' ? 'video/mp4' : 'video/webm';
-                    const blob = new Blob(recordedChunks, { type: fileType });
+                    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+                    const videoURL = URL.createObjectURL(blob);
+                    
+                    // Display the recorded video
+                    stopCurrentStream(liveVideo); // Stop the recording stream tracks
+                    liveVideo.srcObject = null;
+                    liveVideo.src = videoURL;
+                    liveVideo.controls = true; // Add controls to the recorded video
+                    liveVideo.loop = true;
 
-                    videoURL = URL.createObjectURL(blob);
-                    video.srcObject = null;
-                    video.src = videoURL;
-                    video.load();
+                    downloadButton.href = videoURL;
+                    downloadButton.download = `aivideo_recording.${fileTypeSelect.value}`;
                     
                     downloadButton.disabled = false;
-                    status.textContent = 'Recording finished. Video saved!';
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                    isRecording = false;
+                    statusEl.textContent = `Recording saved as ${fileTypeSelect.value.toUpperCase()}. Ready to download or start new recording.`;
+
+                    // Restart camera classification preview if it was only a screen recording
+                    if (recordType !== 'camera' && recordType !== 'both' && rafId) {
+                         // The classification loop would have stopped tracks.
+                         // But if the user wants to keep the classifier active after recording, 
+                         // we need a new camera stream. We'll leave it simple for now: 
+                         // only activate preview/classification on 'camera' or 'both' selection.
+                    }
                 };
 
-                mediaRecorder.start();
+                mediaRecorder.start(1000); // Record in 1-second chunks
+                
                 startButton.disabled = true;
                 stopButton.disabled = false;
-                status.textContent = 'Recording in progress...';
+                downloadButton.disabled = true;
+                isRecording = true;
+                statusEl.textContent = 'Recording in progress...';
+                liveVideo.controls = false;
+                liveVideo.loop = false;
+
             } catch (error) {
                 console.error('Error starting recording:', error);
+                statusEl.textContent = `Error: ${error.message}. Please grant necessary permissions.`;
+                startButton.disabled = false;
+                stopButton.disabled = true;
             }
         });
 
         stopButton.addEventListener('click', () => {
-            if (mediaRecorder) {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
-                if (video.srcObject) {
-                    video.srcObject.getTracks().forEach(track => track.stop());
+                
+                // Stop the preview/recording stream tracks (they will be cleaned up in onstop)
+                if (liveVideo.srcObject) {
+                    liveVideo.srcObject.getTracks().forEach(track => track.stop());
+                    liveVideo.srcObject = null;
                 }
-                startButton.disabled = false;
-                stopButton.disabled = true;
-                status.textContent = 'Recording stopped. Saving video...';
+                
+                // Stop the classification loop
+                cancelAnimationFrame(rafId);
+                rafId = null;
+                isCameraActive = false;
             }
         });
 
-        downloadButton.addEventListener('click', () => {
-            if (videoURL) {
-                const a = document.createElement('a');
-                a.href = videoURL;
-                a.download = `recording.${fileTypeSelect.value}`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+        downloadButton.addEventListener('click', (e) => {
+            if (downloadButton.href && !downloadButton.disabled) {
+                // Standard download handled by <a> tag attributes
+                statusEl.textContent = 'Download initiated!';
+            } else {
+                e.preventDefault();
+                statusEl.textContent = 'No video to download.';
+            }
+        });
+        
+        trainButton1.addEventListener('click', () => trainClass(0));
+        trainButton2.addEventListener('click', () => trainClass(1));
+
+        // Initial setup for camera preview/classification based on initial selection
+        recordTypeSelect.addEventListener('change', async (e) => {
+            stopCurrentStream(liveVideo);
+            cancelAnimationFrame(rafId);
+            rafId = null;
+            
+            const type = e.target.value;
+            if (type === 'camera' || type === 'both') {
+                try {
+                    const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    liveVideo.srcObject = cameraStream;
+                    isCameraActive = true;
+                    classificationLoop(); // Start classification loop
+                    statusEl.textContent = 'Camera preview ready. Train the AI or start recording.';
+                } catch (error) {
+                    console.error("Camera setup failed:", error);
+                    statusEl.textContent = 'Camera access denied. Classification is unavailable.';
+                }
+            } else {
+                statusEl.textContent = 'Ready. Select your source and start recording.';
+                classificationStatusEl.textContent = 'Camera not active. Classification paused.';
             }
         });
 
-        video.addEventListener('play', () => {
-            const resizeCanvas = () => {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                video.style.width = '100%';
-                video.style.height = 'auto';
-                canvas.style.width = '100%';
-                canvas.style.height = 'auto';
-            };
+        // Initialize models on page load
+        loadModels();
+        
+        // Initial call to set up camera if "camera" or "both" is default
+        recordTypeSelect.dispatchEvent(new Event('change'));
 
-            video.addEventListener('loadedmetadata', resizeCanvas);
-            window.addEventListener('resize', resizeCanvas);
-            resizeCanvas();
-        });
     </script>
 </body>
 </html>
